@@ -6,7 +6,7 @@
 
   // --- Load font ---
   const fontLink = document.createElement('link');
-  fontLink.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap';
+  fontLink.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap';
   fontLink.rel = 'stylesheet';
   document.head.appendChild(fontLink);
 
@@ -15,11 +15,7 @@
     const sidebar = document.createElement('div');
     sidebar.id = 'easyreach-sidebar';
     sidebar.innerHTML = `
-      <div class="la-header">
-        <h2 class="la-title">EasyReach</h2>
-        <button class="la-close">&times;</button>
-      </div>
-      <hr class="la-divider" />
+      <div class="la-accent-bar"></div>
       <div class="la-tabs">
         <button class="la-tab active" data-tab="draft">Draft</button>
         <button class="la-tab" data-tab="about">Context</button>
@@ -510,6 +506,7 @@ ${toneInstruction}
 ${lengthInstruction}
 - Sound natural and human, not robotic
 - Do not include a subject line
+- Use proper line breaks between paragraphs, greetings, and sign-offs — never run sentences together without spacing
 - Sign off as ${userName} when appropriate
 - Output ONLY the raw message text, no quotes, no markdown, no formatting markers
 
@@ -611,7 +608,7 @@ Recipient: ${recipientInfo.name}`;
     const sidebar = createSidebar();
     const toggleBtn = createToggleButton();
 
-    const closeBtn = sidebar.querySelector('.la-close');
+    // Close sidebar when clicking outside
     const generateBtn = document.getElementById('la-generate');
     const promptInput = document.getElementById('la-prompt');
     const toneSelect = document.getElementById('la-tone');
@@ -690,8 +687,10 @@ Recipient: ${recipientInfo.name}`;
       }
     });
 
-    closeBtn.addEventListener('click', () => {
-      sidebar.classList.remove('open');
+    document.addEventListener('click', (e) => {
+      if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && e.target !== toggleBtn) {
+        sidebar.classList.remove('open');
+      }
     });
 
     // Tab switching
@@ -871,10 +870,12 @@ Recipient: ${recipientInfo.name}`;
 
         const draft = await generateDraft(settings.geminiApiKey, userPrompt, tone, length, recipientInfo, history, myName, aboutMe, senderResume);
 
-        draftOutput.textContent = draft;
+        // Type the draft into EasyReach smoothly, then insert into LinkedIn
+        draftOutput.textContent = '';
         draftSection.classList.add('visible');
+        await typeIntoDraftOutput(draft, draftOutput);
 
-        // On profile pages, auto-copy to clipboard; on messaging, auto-insert
+        // Insert into LinkedIn (or copy on profile pages) after typing completes
         if (isProfilePage()) {
           try {
             await navigator.clipboard.writeText(draft);
@@ -907,6 +908,28 @@ Recipient: ${recipientInfo.name}`;
       } catch {
         errorDiv.textContent = 'Failed to copy. Try selecting the text manually.';
       }
+    });
+  }
+
+  // Smooth typing effect for draft output — returns a promise that resolves when done
+  function typeIntoDraftOutput(text, el) {
+    return new Promise(resolve => {
+      let i = 0;
+      const half = Math.floor(text.length / 2);
+      const speedFast = Math.max(6, Math.min(16, 1200 / half)); // first half ~1.2s
+      const speedSlow = Math.max(12, Math.min(28, 1800 / (text.length - half))); // second half ~1.8s
+      function tick() {
+        if (i < text.length) {
+          const chunk = Math.min(3, text.length - i);
+          el.textContent += text.substring(i, i + chunk);
+          i += chunk;
+          const speed = i < half ? speedFast : speedSlow;
+          setTimeout(tick, speed);
+        } else {
+          resolve();
+        }
+      }
+      tick();
     });
   }
 

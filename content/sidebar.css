@@ -11,7 +11,7 @@
   border-radius: 16px 0 0 16px;
   box-shadow: -2px 0 12px rgba(0, 0, 0, 0.06);
   z-index: 9999;
-  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   flex-direction: column;
@@ -23,44 +23,13 @@
 }
 
 /* Header */
-#easyreach-sidebar .la-header {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 22px 24px 18px;
-  position: relative;
+#easyreach-sidebar .la-accent-bar {
+  height: 3px;
+  background: linear-gradient(90deg, #e07260, #e8956e);
+  border-radius: 16px 0 0 0;
+  flex-shrink: 0;
 }
 
-#easyreach-sidebar .la-title {
-  font-size: 18px;
-  margin: 0;
-  font-weight: 700;
-  color: #222;
-  letter-spacing: -0.02em;
-}
-
-#easyreach-sidebar .la-close {
-  background: none;
-  border: 1px solid #ddd;
-  color: #666;
-  font-size: 16px;
-  cursor: pointer;
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-  border-radius: 50%;
-  transition: all 0.15s;
-  position: absolute;
-  right: 24px;
-}
-
-#easyreach-sidebar .la-close:hover {
-  background: #f5f5f5;
-  color: #222;
-}
 
 #easyreach-sidebar .la-divider {
   border: none;
