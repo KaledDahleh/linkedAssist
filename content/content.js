@@ -114,9 +114,36 @@
     return '';
   }
 
+  // --- Detect if we're on a profile page ---
+  function isProfilePage() {
+    return /^\/in\/[^/]+/.test(location.pathname);
+  }
+
+  function getProfilePageInfo() {
+    const name = document.querySelector('h1.text-heading-xlarge, h1.inline')?.textContent?.trim() || 'Unknown';
+    const headline = document.querySelector('.text-body-medium.break-words')?.textContent?.trim() || '';
+    const profileUrl = location.href.split('?')[0];
+
+    let photoUrl = '';
+    const profileImg = document.querySelector('.pv-top-card-profile-picture__image, .profile-photo-edit__preview, img.evi-image');
+    if (profileImg) {
+      const src = profileImg.src || '';
+      if (src && src.startsWith('http') && !src.includes('ghost')) {
+        photoUrl = src;
+      }
+    }
+
+    return { name, headline, profileUrl, photoUrl };
+  }
+
   // --- Scraping LinkedIn context ---
   function getRecipientInfo() {
-    // The conversation header always shows the OTHER person's name
+    // If on a profile page, scrape from the profile itself
+    if (isProfilePage()) {
+      return getProfilePageInfo();
+    }
+
+    // Otherwise, scrape from messaging UI
     const headerSelectors = [
       'h2.msg-entity-lockup__entity-title',
       '.msg-conversation-card__participant-names',
@@ -132,7 +159,6 @@
       }
     }
 
-    // Get recipient's profile URL — find a profile link whose text matches the recipient name
     let profileUrl = '';
     if (name) {
       const allProfileLinks = document.querySelectorAll('a[href*="/in/"]');
@@ -144,7 +170,6 @@
         }
       }
     }
-    // Fallback to profile card or header link
     if (!profileUrl) {
       const profileCardLink = document.querySelector('.profile-card-one-to-one__profile-link');
       const headerLink = document.querySelector('.msg-thread__link-to-profile');
@@ -155,7 +180,6 @@
       }
     }
 
-    // Get headline from the entity subtitle (shows under the name in convo header)
     const headlineSelectors = [
       '.artdeco-entity-lockup__subtitle',
       '.msg-entity-lockup__entity-subtitle',
@@ -171,9 +195,7 @@
       }
     }
 
-    // Get recipient's profile photo
     let photoUrl = '';
-    // Try: find any img near the conversation header that looks like a profile photo
     const photoSelectors = [
       '.msg-entity-lockup__entity-photo img',
       '.msg-thread__link-to-profile img',
@@ -187,7 +209,6 @@
         const src = img.src || img.getAttribute('data-delayed-url') || '';
         if (src && src.startsWith('http') && !src.includes('ghost')) {
           const alt = img.alt || '';
-          // Only use this photo if the alt text matches the recipient name
           if (name && alt.includes(name)) {
             photoUrl = src;
             break;
@@ -196,8 +217,6 @@
       }
       if (photoUrl) break;
     }
-    // Also try to get photo from the FullProfile API response (stored in cache later)
-    // For now, also check for background-image style on presence entities
     if (!photoUrl) {
       const presenceEls = document.querySelectorAll('.presence-entity__image, .EntityPhoto-circle-4, [data-anonymize="headshot-photo"]');
       for (const el of presenceEls) {
@@ -210,7 +229,6 @@
       }
     }
 
-    // Try to scrape additional profile details from the right-side panel
     const profileDetails = scrapeProfilePanel();
 
     return { name: name || 'Unknown', headline, profileUrl, photoUrl, ...profileDetails };
@@ -856,10 +874,18 @@ Recipient: ${recipientInfo.name}`;
         draftOutput.textContent = draft;
         draftSection.classList.add('visible');
 
-        // Auto-insert into LinkedIn composer
-        const inserted = insertIntoComposer(draft);
-        if (!inserted) {
-          errorDiv.textContent = 'Draft ready but could not auto-insert. Click on a conversation first.';
+        // On profile pages, auto-copy to clipboard; on messaging, auto-insert
+        if (isProfilePage()) {
+          try {
+            await navigator.clipboard.writeText(draft);
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+          } catch {}
+        } else {
+          const inserted = insertIntoComposer(draft);
+          if (!inserted) {
+            errorDiv.textContent = 'Draft ready but could not auto-insert. Click on a conversation first.';
+          }
         }
       } catch (err) {
         errorDiv.textContent = err.message;
