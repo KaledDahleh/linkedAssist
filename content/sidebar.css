@@ -1,0 +1,429 @@
+/* EasyReach Sidebar */
+
+#easyreach-sidebar {
+  position: fixed;
+  top: 0;
+  right: -400px;
+  width: 380px;
+  height: 100vh;
+  background: #fff;
+  border-left: 1px solid #e0e0e0;
+  border-radius: 16px 0 0 16px;
+  box-shadow: -2px 0 12px rgba(0, 0, 0, 0.06);
+  z-index: 9999;
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#easyreach-sidebar.open {
+  right: 0;
+}
+
+/* Header */
+#easyreach-sidebar .la-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px 24px 18px;
+  position: relative;
+}
+
+#easyreach-sidebar .la-title {
+  font-size: 18px;
+  margin: 0;
+  font-weight: 700;
+  color: #222;
+  letter-spacing: -0.02em;
+}
+
+#easyreach-sidebar .la-close {
+  background: none;
+  border: 1px solid #ddd;
+  color: #666;
+  font-size: 16px;
+  cursor: pointer;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  border-radius: 50%;
+  transition: all 0.15s;
+  position: absolute;
+  right: 24px;
+}
+
+#easyreach-sidebar .la-close:hover {
+  background: #f5f5f5;
+  color: #222;
+}
+
+#easyreach-sidebar .la-divider {
+  border: none;
+  border-top: 1px solid #ebebeb;
+  margin: 0;
+}
+
+#easyreach-sidebar .la-tab-draft .la-divider {
+  margin: 4px 0 20px;
+}
+
+/* Tabs */
+#easyreach-sidebar .la-tabs {
+  display: flex;
+  padding: 0 24px;
+  gap: 0;
+  border-bottom: 1px solid #ebebeb;
+}
+
+#easyreach-sidebar .la-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 12px 0;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #999;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+#easyreach-sidebar .la-tab:hover {
+  color: #555;
+}
+
+#easyreach-sidebar .la-tab.active {
+  color: #222;
+  border-bottom-color: #e07260;
+}
+
+/* Tab content */
+#easyreach-sidebar .la-tab-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px 24px;
+  display: none;
+}
+
+#easyreach-sidebar .la-tab-content.active {
+  display: block;
+}
+
+#easyreach-sidebar .la-tab-about .la-about-me {
+  min-height: 120px;
+  font-size: 14px;
+}
+
+#easyreach-sidebar .la-tab-about .la-divider {
+  margin: 4px 0 20px;
+}
+
+/* Recipient card */
+#easyreach-sidebar .la-context {
+  background: #fff;
+  border-bottom: 1px solid #ebebeb;
+  border-radius: 0;
+  padding: 0 0 18px 0;
+  margin-bottom: 22px;
+}
+
+#easyreach-sidebar .la-context-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+#easyreach-sidebar .la-context-photo {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+#easyreach-sidebar .la-context-initials {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f0f0f0;
+  color: #555;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+#easyreach-sidebar .la-context-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 3px;
+}
+
+#easyreach-sidebar .la-context-name {
+  font-weight: 600;
+  font-size: 16px;
+  color: #222;
+}
+
+#easyreach-sidebar .la-context-headline {
+  font-size: 13px;
+  color: #717171;
+  margin-top: 2px;
+}
+
+/* Fields */
+#easyreach-sidebar .la-options-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 0;
+}
+
+#easyreach-sidebar .la-field-half {
+  flex: 1;
+  min-width: 0;
+}
+
+#easyreach-sidebar .la-field {
+  margin-bottom: 20px;
+}
+
+#easyreach-sidebar .la-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #222;
+}
+
+#easyreach-sidebar .la-field select {
+  height: 42px;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23717171' fill='none' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+#easyreach-sidebar .la-field input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: #ebebeb;
+  outline: none;
+  margin-top: 16px;
+  cursor: pointer;
+}
+
+#easyreach-sidebar .la-field input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.15s;
+}
+
+#easyreach-sidebar .la-field input[type="range"]::-webkit-slider-thumb:hover {
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+
+#easyreach-sidebar .la-field select,
+#easyreach-sidebar .la-field textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #d1d1d1;
+  border-radius: 10px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #fff;
+  color: #222;
+  resize: vertical;
+  box-sizing: border-box;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+#easyreach-sidebar .la-field textarea {
+  min-height: 88px;
+  line-height: 1.5;
+}
+
+#easyreach-sidebar .la-field textarea::placeholder {
+  color: #b0b0b0;
+}
+
+#easyreach-sidebar .la-field select:focus,
+#easyreach-sidebar .la-field textarea:focus {
+  outline: none;
+  border-color: #222;
+  box-shadow: none;
+}
+
+/* Generate button */
+#easyreach-sidebar .la-generate-btn {
+  width: 100%;
+  padding: 13px;
+  background: #e07260;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+#easyreach-sidebar .la-generate-btn:hover {
+  background: #d4614f;
+}
+
+#easyreach-sidebar .la-generate-btn:disabled {
+  background: #ddd;
+  color: #999;
+  cursor: not-allowed;
+}
+
+/* Error */
+#easyreach-sidebar .la-error {
+  color: #c13515;
+  font-size: 13px;
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: #fef0ed;
+  border-radius: 10px;
+}
+
+#easyreach-sidebar .la-error:empty {
+  display: none;
+}
+
+/* Draft section */
+#easyreach-sidebar .la-draft-section {
+  margin-top: 22px;
+  display: none;
+}
+
+#easyreach-sidebar .la-draft-section.visible {
+  display: block;
+}
+
+#easyreach-sidebar .la-draft-output {
+  background: #f7f7f7;
+  border: 1px solid #ebebeb;
+  border-radius: 10px;
+  padding: 16px 18px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #222;
+  white-space: pre-wrap;
+  margin-bottom: 12px;
+  min-height: 60px;
+}
+
+/* Action buttons */
+#easyreach-sidebar .la-draft-actions {
+  display: flex;
+  gap: 8px;
+}
+
+#easyreach-sidebar .la-draft-actions button {
+  flex: 1;
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+#easyreach-sidebar .la-copy-btn {
+  background: #fff;
+  color: #222;
+  border: 1px solid #d1d1d1;
+}
+
+#easyreach-sidebar .la-copy-btn:hover {
+  background: #f7f7f7;
+}
+
+
+#easyreach-sidebar .la-resume-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#easyreach-sidebar .la-resume-btn {
+  background: none;
+  border: 1px solid #d1d1d1;
+  color: #555;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+#easyreach-sidebar .la-resume-btn:hover {
+  background: #f7f7f7;
+  color: #222;
+}
+
+#easyreach-sidebar .la-resume-btn.attached {
+  border-color: #e07260;
+  color: #e07260;
+}
+
+#easyreach-sidebar .la-resume-name {
+  font-size: 12px;
+  color: #717171;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Toggle button */
+#easyreach-toggle {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #e07260;
+  color: #fff;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(224, 114, 96, 0.35);
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+#easyreach-toggle:hover {
+  background: #d4614f;
+  box-shadow: 0 4px 14px rgba(224, 114, 96, 0.45);
+  transform: scale(1.05);
+}
