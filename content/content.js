@@ -89,7 +89,7 @@
   function createToggleButton() {
     const btn = document.createElement('button');
     btn.id = 'easyreach-toggle';
-    btn.textContent = '✍️';
+    btn.textContent = 'EasyReach';
     btn.title = 'Open EasyReach';
     document.body.appendChild(btn);
     return btn;
@@ -116,16 +116,74 @@
   }
 
   function getProfilePageInfo() {
-    const name = document.querySelector('h1.text-heading-xlarge, h1.inline')?.textContent?.trim() || 'Unknown';
-    const headline = document.querySelector('.text-body-medium.break-words')?.textContent?.trim() || '';
+    // Try multiple selectors for the profile name
+    const nameSelectors = [
+      'h1.text-heading-xlarge',
+      'h1.inline',
+      '.pv-top-card--list li:first-child',
+      'h1[data-anonymize="person-name"]',
+      '.top-card-layout__title',
+    ];
+    let name = 'Unknown';
+    for (const sel of nameSelectors) {
+      const el = document.querySelector(sel);
+      if (el && el.textContent.trim()) {
+        name = el.textContent.trim();
+        break;
+      }
+    }
+
+    // Headline
+    const headlineSelectors = [
+      '.text-body-medium.break-words',
+      '.pv-top-card--list .text-body-medium',
+      '[data-anonymize="headline"]',
+      '.top-card-layout__headline',
+    ];
+    let headline = '';
+    for (const sel of headlineSelectors) {
+      const el = document.querySelector(sel);
+      if (el && el.textContent.trim()) {
+        headline = el.textContent.trim();
+        break;
+      }
+    }
+
     const profileUrl = location.href.split('?')[0];
 
+    // Photo — try multiple selectors and also look for any large img near the top card
     let photoUrl = '';
-    const profileImg = document.querySelector('.pv-top-card-profile-picture__image, .profile-photo-edit__preview, img.evi-image');
-    if (profileImg) {
-      const src = profileImg.src || '';
-      if (src && src.startsWith('http') && !src.includes('ghost')) {
-        photoUrl = src;
+    const photoSelectors = [
+      '.pv-top-card-profile-picture__image--show',
+      '.pv-top-card-profile-picture__image',
+      '.profile-photo-edit__preview',
+      'img.evi-image.ember-view[width="200"]',
+      '.top-card-layout__entity-image',
+      'img[data-anonymize="headshot-photo"]',
+    ];
+    for (const sel of photoSelectors) {
+      const img = document.querySelector(sel);
+      if (img) {
+        const src = img.src || img.getAttribute('data-delayed-url') || '';
+        if (src && src.startsWith('http') && !src.includes('ghost')) {
+          photoUrl = src;
+          break;
+        }
+      }
+    }
+    // Fallback: find any img whose alt contains the person's name in the top card area
+    if (!photoUrl && name !== 'Unknown') {
+      const topCard = document.querySelector('.pv-top-card, .scaffold-layout__main, .top-card-layout');
+      if (topCard) {
+        const imgs = topCard.querySelectorAll('img');
+        for (const img of imgs) {
+          const alt = img.alt || '';
+          const src = img.src || '';
+          if (alt.includes(name) && src.startsWith('http') && !src.includes('ghost')) {
+            photoUrl = src;
+            break;
+          }
+        }
       }
     }
 
@@ -688,9 +746,11 @@ Recipient: ${recipientInfo.name}`;
     });
 
     document.addEventListener('click', (e) => {
-      if (sidebar.classList.contains('open') && !sidebar.contains(e.target) && e.target !== toggleBtn) {
-        sidebar.classList.remove('open');
-      }
+      if (!sidebar.classList.contains('open') || sidebar.contains(e.target) || e.target === toggleBtn) return;
+      // Don't close if clicking on LinkedIn UI elements (conversations, nav, buttons, links, inputs)
+      const interactive = e.target.closest('a, button, input, textarea, select, [role="button"], [role="link"], [role="option"], [role="listitem"], .msg-conversation-listitem, .msg-conversation-card, .msg-s-message-list-content, .global-nav, .scaffold-layout__list, .msg-overlay-list-bubble');
+      if (interactive) return;
+      sidebar.classList.remove('open');
     });
 
     // Tab switching
