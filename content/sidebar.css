@@ -41,6 +41,21 @@
   margin: 4px 0 20px;
 }
 
+/* Header */
+#easyreach-sidebar .la-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px 0 24px;
+}
+
+#easyreach-sidebar .la-brand {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e07260;
+  letter-spacing: -0.3px;
+}
+
 /* Tabs */
 #easyreach-sidebar .la-tabs {
   display: flex;
@@ -70,6 +85,21 @@
 #easyreach-sidebar .la-tab.active {
   color: #222;
   border-bottom-color: #e07260;
+}
+
+#easyreach-sidebar .la-close-btn {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: #999;
+  cursor: pointer;
+  padding: 4px 0;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+#easyreach-sidebar .la-close-btn:hover {
+  color: #333;
 }
 
 /* Tab content */
@@ -235,6 +265,11 @@
 
 #easyreach-sidebar .la-field textarea::placeholder {
   color: #b0b0b0;
+  transition: opacity 0.2s ease;
+}
+
+#easyreach-sidebar .la-field textarea.la-placeholder-hidden::placeholder {
+  opacity: 0;
 }
 
 #easyreach-sidebar .la-field select:focus,

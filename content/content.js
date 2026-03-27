@@ -16,6 +16,10 @@
     sidebar.id = 'easyreach-sidebar';
     sidebar.innerHTML = `
       <div class="la-accent-bar"></div>
+      <div class="la-header-row">
+        <span class="la-brand">EasyReach</span>
+        <button class="la-close-btn" id="la-close" title="Close">&times;</button>
+      </div>
       <div class="la-tabs">
         <button class="la-tab active" data-tab="draft">Draft</button>
         <button class="la-tab" data-tab="about">Context</button>
@@ -96,23 +100,97 @@
   }
 
   // --- Auto-detect the logged-in user's name ---
+  let cachedMyName = '';
   function getMyName() {
+    if (cachedMyName) return cachedMyName;
+
     // The nav "Me" button has an alt text with the user's name
     const meImg = document.querySelector('.global-nav__me-photo, img.nav-item__profile-member-photo');
     if (meImg && meImg.alt) {
-      return meImg.alt.trim();
+      cachedMyName = meImg.alt.trim();
+      return cachedMyName;
     }
     // Fallback: look for the profile nav link text
     const meLink = document.querySelector('.global-nav__primary-link--me .t-14');
     if (meLink) {
-      return meLink.textContent.trim();
+      cachedMyName = meLink.textContent.trim();
+      return cachedMyName;
     }
+    // Fallback: find any img in the nav with alt text that looks like a name
+    const navImgs = document.querySelectorAll('nav img[alt], header img[alt]');
+    for (const img of navImgs) {
+      const alt = img.alt.trim();
+      if (alt && /^[A-Z][a-z]+ [A-Z]/.test(alt) && alt.length < 40) {
+        cachedMyName = alt;
+        return cachedMyName;
+      }
+    }
+    // Fallback: use stored name from chrome.storage
     return '';
   }
 
+  // Try to detect and store the user's name via the Voyager API
+  let myNamePromise = null;
+  async function detectAndCacheMyName() {
+    if (cachedMyName) return;
+    try {
+      const csrfToken = document.cookie.match(/JSESSIONID="?([^";]+)"?/)?.[1] || '';
+      const resp = await fetch('https://www.linkedin.com/voyager/api/me', {
+        credentials: 'include',
+        headers: { 'csrf-token': csrfToken, 'x-restli-protocol-version': '2.0.0' },
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        console.log('[EasyReach] /api/me response keys:', Object.keys(data));
+        // Try multiple possible response structures
+        const firstName = data.miniProfile?.firstName || data.firstName || '';
+        const lastName = data.miniProfile?.lastName || data.lastName || '';
+        if (firstName && lastName) {
+          cachedMyName = `${firstName} ${lastName}`;
+          console.log('[EasyReach] Detected logged-in user:', cachedMyName);
+        } else {
+          // Last resort: look for any name-like field in the response
+          const plain = data.plainId || data.publicIdentifier || '';
+          console.log('[EasyReach] /api/me no name found. firstName:', firstName, 'lastName:', lastName, 'plainId:', plain);
+          // Try the profile endpoint as fallback
+          if (plain) {
+            try {
+              const profResp = await fetch(
+                `https://www.linkedin.com/voyager/api/identity/dash/profiles?q=memberIdentity&memberIdentity=${plain}&decorationId=com.linkedin.voyager.dash.deco.identity.profile.FullProfileWithEntities-93`,
+                { credentials: 'include', headers: { 'csrf-token': csrfToken, 'x-restli-protocol-version': '2.0.0' } }
+              );
+              if (profResp.ok) {
+                const profData = await profResp.json();
+                const el = (profData.elements || [])[0];
+                if (el?.firstName && el?.lastName) {
+                  cachedMyName = `${el.firstName} ${el.lastName}`;
+                  console.log('[EasyReach] Detected logged-in user via profile API:', cachedMyName);
+                }
+              }
+            } catch (e2) {}
+          }
+        }
+      } else {
+        console.log('[EasyReach] /api/me failed with status:', resp.status);
+      }
+    } catch (e) {
+      console.log('[EasyReach] /api/me error:', e);
+    }
+  }
+  myNamePromise = detectAndCacheMyName();
+
+  // --- Track last visited profile page URL ---
+  let lastProfilePageUrl = '';
+  // Track the active messaging participant detected via MutationObserver
+  let activeMessagingParticipant = null;
+
   // --- Detect if we're on a profile page ---
   function isProfilePage() {
-    return /^\/in\/[^/]+/.test(location.pathname);
+    const onProfile = /^\/in\/[^/]+/.test(location.pathname);
+    if (onProfile) {
+      lastProfilePageUrl = location.href.split('?')[0];
+    }
+    return onProfile;
   }
 
   function getProfilePageInfo() {
@@ -190,6 +268,24 @@
     return { name, headline, profileUrl, photoUrl };
   }
 
+  // --- Messaging participant data from fetch interceptor (intercept.js, MAIN world) ---
+  let latestMessagingParticipant = null;
+
+  // Listen for intercepted profile data
+  const messagingProfiles = {};
+  window.addEventListener('message', (event) => {
+    if (event.data?.type === 'EASYREACH_MESSAGING_PROFILES') {
+      const myName = getMyName();
+      for (const p of event.data.profiles) {
+        // Skip the logged-in user
+        if (myName && p.name === myName) continue;
+        messagingProfiles[p.publicIdentifier] = p;
+        latestMessagingParticipant = p;
+        console.log('[EasyReach] Captured messaging participant:', p.name, p.publicIdentifier);
+      }
+    }
+  });
+
   // --- Scraping LinkedIn context ---
   function getRecipientInfo() {
     // If on a profile page, scrape from the profile itself
@@ -197,95 +293,207 @@
       return getProfilePageInfo();
     }
 
-    // Otherwise, scrape from messaging UI
-    const headerSelectors = [
-      'h2.msg-entity-lockup__entity-title',
-      '.msg-conversation-card__participant-names',
-      '.msg-overlay-bubble-header__title',
-    ];
+    // On messaging pages, prefer intercepted API data
+    if (latestMessagingParticipant) {
+      const p = latestMessagingParticipant;
+      let photoUrl = '';
+      // Extract photo from the picture data
+      const picData = p.picture?.['com.linkedin.common.VectorImage']?.artifacts || [];
+      if (picData.length > 0) {
+        const rootUrl = p.picture?.['com.linkedin.common.VectorImage']?.rootUrl || '';
+        const largest = picData[picData.length - 1];
+        if (rootUrl && largest?.fileIdentifyingUrlPathSegment) {
+          photoUrl = rootUrl + largest.fileIdentifyingUrlPathSegment;
+        }
+      }
+      return {
+        name: p.name,
+        headline: p.occupation || '',
+        profileUrl: `https://www.linkedin.com/in/${p.publicIdentifier}/`,
+        photoUrl,
+      };
+    }
 
+    // Strategy: Check the preload iframe for active conversation participants
+    // LinkedIn's preload iframe contains profile links for the current conversation
+    const myName = getMyName();
+    let participantName = '';
+    let profileUrl = '';
+
+    try {
+      const iframes = document.querySelectorAll('iframe');
+      for (const iframe of iframes) {
+        try {
+          const doc = iframe.contentDocument;
+          if (!doc) continue;
+          const links = doc.querySelectorAll('a[href*="/in/"]');
+          for (const link of links) {
+            const text = link.textContent.trim().split('\n')[0].trim();
+            if (!text || text.includes('View') || text.includes('profile')) continue;
+            // Skip the logged-in user
+            if (myName && text.toLowerCase() === myName.toLowerCase()) continue;
+            // Skip stale profile page person
+            const staleSlug = lastProfilePageUrl ? lastProfilePageUrl.match(/\/in\/([^/?]+)/)?.[1] : '';
+            const slug = link.href.match(/\/in\/([^/?]+)/)?.[1];
+            // Don't skip by staleSlug here — the iframe only has active conversation participants
+            if (slug && text) {
+              participantName = text;
+              profileUrl = 'https://www.linkedin.com/in/' + slug + '/';
+              break;
+            }
+          }
+          if (participantName) break;
+        } catch (e) { /* cross-origin iframe, skip */ }
+      }
+    } catch (e) {}
+
+    console.log('[EasyReach DEBUG] Preload iframe - name:', participantName, 'profileUrl:', profileUrl);
+
+    if (participantName) {
+      return { name: participantName, headline: '', profileUrl, photoUrl: '' };
+    }
+
+    // Fallback: Use MutationObserver-detected participant (skip if it's the logged-in user)
+    if (activeMessagingParticipant && activeMessagingParticipant.name) {
+      if (!myName || activeMessagingParticipant.name.toLowerCase() !== myName.toLowerCase()) {
+        return { name: activeMessagingParticipant.name, headline: '', profileUrl: activeMessagingParticipant.profileUrl || '', photoUrl: '' };
+      }
+    }
+
+    // Fallback: DOM scraping with semantic selectors (works on fresh page loads)
+    // Priority 1: Get the name from the active conversation THREAD header (right pane)
+    // This is the most reliable — it's the header of the open conversation
+    const threadHeaderSelectors = [
+      '.msg-thread__link-to-profile',                  // profile link in thread header
+      '.msg-conversation-card--active .msg-entity-lockup__entity-title',  // active card name
+      '.msg-conversations-container__convo-item--active h2',              // active convo heading
+    ];
     let name = '';
-    for (const sel of headerSelectors) {
-      const el = document.querySelector(sel);
-      if (el && el.textContent.trim()) {
-        name = el.textContent.trim();
+    let domProfileUrl = '';
+
+    // First try to get name + URL from thread header profile link
+    const threadLink = document.querySelector('.msg-thread__link-to-profile');
+    if (threadLink) {
+      const linkText = threadLink.textContent.trim().split('\n')[0].trim();
+      if (linkText && (!myName || linkText.toLowerCase() !== myName.toLowerCase())) {
+        name = linkText;
+        if (threadLink.href?.includes('/in/')) {
+          domProfileUrl = threadLink.href.split('?')[0];
+        }
+      }
+    }
+
+    // Try active conversation card
+    if (!name) {
+      const activeCardSelectors = [
+        '.msg-conversation-card--active .msg-entity-lockup__entity-title',
+        '.msg-conversations-container__convo-item--active h2',
+        '.msg-conversation-listitem--active h2',
+      ];
+      for (const sel of activeCardSelectors) {
+        const el = document.querySelector(sel);
+        if (el && el.textContent.trim()) {
+          const found = el.textContent.trim();
+          if (myName && found.toLowerCase() === myName.toLowerCase()) continue;
+          name = found;
+          break;
+        }
+      }
+    }
+
+    // Fallback: any conversation card title, but prefer ones that aren't self
+    if (!name) {
+      const allTitles = document.querySelectorAll('h2.msg-entity-lockup__entity-title');
+      for (const el of allTitles) {
+        const found = el.textContent.trim();
+        if (!found) continue;
+        if (myName && found.toLowerCase() === myName.toLowerCase()) continue;
+        name = found;
         break;
       }
     }
 
-    let profileUrl = '';
-    if (name) {
-      const allProfileLinks = document.querySelectorAll('a[href*="/in/"]');
-      for (const link of allProfileLinks) {
+    // Last resort: overlay header
+    if (!name) {
+      const overlay = document.querySelector('.msg-overlay-bubble-header__title');
+      if (overlay && overlay.textContent.trim()) {
+        const found = overlay.textContent.trim();
+        if (!myName || found.toLowerCase() !== myName.toLowerCase()) {
+          name = found;
+        }
+      }
+    }
+
+    // Find profile URL if we have a name but no URL yet
+    if (name && !domProfileUrl) {
+      const allLinks = document.querySelectorAll('a[href*="/in/"]');
+      for (const link of allLinks) {
         const linkText = link.textContent.trim().split('\n')[0].trim();
         if (linkText === name && link.href.includes('/in/')) {
-          profileUrl = link.href;
+          domProfileUrl = link.href.split('?')[0];
           break;
         }
       }
     }
-    if (!profileUrl) {
-      const profileCardLink = document.querySelector('.profile-card-one-to-one__profile-link');
+    if (!domProfileUrl) {
       const headerLink = document.querySelector('.msg-thread__link-to-profile');
-      if (profileCardLink && profileCardLink.href) {
-        profileUrl = profileCardLink.href;
-      } else if (headerLink && headerLink.href) {
-        profileUrl = headerLink.href;
-      }
+      if (headerLink?.href) domProfileUrl = headerLink.href;
     }
 
-    const headlineSelectors = [
-      '.artdeco-entity-lockup__subtitle',
-      '.msg-entity-lockup__entity-subtitle',
-      '.profile-card-one-to-one__subtitle',
-    ];
+    console.log('[EasyReach DEBUG] DOM scraping - name:', name, 'profileUrl:', domProfileUrl, 'myName:', myName);
 
-    let headline = '';
-    for (const sel of headlineSelectors) {
-      const el = document.querySelector(sel);
-      if (el && el.textContent.trim()) {
-        headline = el.textContent.trim();
-        break;
-      }
+    if (name) {
+      return { name, headline: '', profileUrl: domProfileUrl, photoUrl: '' };
     }
 
-    let photoUrl = '';
-    const photoSelectors = [
-      '.msg-entity-lockup__entity-photo img',
-      '.msg-thread__link-to-profile img',
-      '.profile-card-one-to-one__profile-link img',
-      '.presence-entity__image',
-      '.msg-selectable-entity__entity img',
-    ];
-    for (const sel of photoSelectors) {
-      const imgs = document.querySelectorAll(sel);
-      for (const img of imgs) {
-        const src = img.src || img.getAttribute('data-delayed-url') || '';
-        if (src && src.startsWith('http') && !src.includes('ghost')) {
-          const alt = img.alt || '';
-          if (name && alt.includes(name)) {
-            photoUrl = src;
-            break;
-          }
+    return { name: 'Unknown', headline: '', profileUrl: '', photoUrl: '' };
+  }
+
+  // Async fallback: fetch the active conversation's participant from Voyager messaging API
+  async function fetchActiveConversationParticipant() {
+    try {
+      const csrfToken = document.cookie.match(/JSESSIONID="?([^";]+)"?/)?.[1] || '';
+      if (!csrfToken) return null;
+
+      // Try to get the conversation ID from the URL
+      const convoMatch = location.pathname.match(/\/messaging\/thread\/([^/]+)/);
+      if (!convoMatch) return null;
+      const threadId = convoMatch[1];
+
+      // Use the messaging conversations endpoint with the thread ID
+      const resp = await fetch(
+        `https://www.linkedin.com/voyager/api/messaging/conversations/${threadId}`,
+        {
+          credentials: 'include',
+          headers: {
+            'csrf-token': csrfToken,
+            'x-restli-protocol-version': '2.0.0',
+          },
         }
-      }
-      if (photoUrl) break;
-    }
-    if (!photoUrl) {
-      const presenceEls = document.querySelectorAll('.presence-entity__image, .EntityPhoto-circle-4, [data-anonymize="headshot-photo"]');
-      for (const el of presenceEls) {
-        const bg = el.style?.backgroundImage || '';
-        const bgMatch = bg.match(/url\(["']?(https[^"')]+)["']?\)/);
-        if (bgMatch) {
-          photoUrl = bgMatch[1];
-          break;
-        }
-      }
-    }
+      );
+      if (!resp.ok) return null;
+      const data = await resp.json();
 
-    const profileDetails = scrapeProfilePanel();
-
-    return { name: name || 'Unknown', headline, profileUrl, photoUrl, ...profileDetails };
+      const myName = getMyName();
+      const participants = data.participants || [];
+      for (const p of participants) {
+        const mini = p['com.linkedin.voyager.messaging.MessagingMember']?.miniProfile
+          || p.miniProfile || {};
+        const firstName = mini.firstName || '';
+        const lastName = mini.lastName || '';
+        const fullName = `${firstName} ${lastName}`.trim();
+        const publicId = mini.publicIdentifier || '';
+        if (!fullName) continue;
+        if (myName && fullName.toLowerCase() === myName.toLowerCase()) continue;
+        return {
+          name: fullName,
+          profileUrl: publicId ? `https://www.linkedin.com/in/${publicId}/` : '',
+        };
+      }
+    } catch (e) {
+      console.log('[EasyReach] Messaging API fallback failed:', e);
+    }
+    return null;
   }
 
   function scrapeProfilePanel() {
@@ -306,9 +514,9 @@
       }
     }
 
-    // Try to get profile URL for context
+    // Try to get profile URL for context — only use messaging-specific selectors
     const profileLink = document.querySelector(
-      '.msg-thread__link-to-profile, .msg-thread-header__profile-link, a[href*="/in/"]'
+      '.msg-thread__link-to-profile, .msg-thread-header__profile-link'
     );
     if (profileLink) {
       details.profileUrl = profileLink.href;
@@ -332,6 +540,46 @@
     return messages.slice(-10);
   }
 
+  // --- Search for a profile by name using Voyager typeahead ---
+  async function searchProfileByName(name) {
+    if (!name || name === 'Unknown') return '';
+    try {
+      const csrfToken = document.cookie.match(/JSESSIONID="?([^";]+)"?/)?.[1] || '';
+      const resp = await fetch(
+        `https://www.linkedin.com/voyager/api/voyagerSearchDashTypeahead?q=type&query=${encodeURIComponent(name)}&type=PROFILE`,
+        {
+          credentials: 'include',
+          headers: {
+            'csrf-token': csrfToken,
+            'x-restli-protocol-version': '2.0.0',
+          },
+        }
+      );
+      if (!resp.ok) return '';
+      const data = await resp.json();
+      const elements = data.elements || [];
+      // Find the best match — look for first/second degree connections
+      for (const el of elements) {
+        const trackingUrn = el.trackingUrn || '';
+        const entityUrn = el.entityUrn || '';
+        const title = el.title?.text || '';
+        // Check if name matches
+        if (title.toLowerCase().includes(name.toLowerCase())) {
+          // Extract public identifier from navigationUrl
+          const navUrl = el.navigationUrl || '';
+          const slugMatch = navUrl.match(/\/in\/([^/?]+)/);
+          if (slugMatch) {
+            console.log('[EasyReach] Search found profile for "' + name + '":', slugMatch[1]);
+            return 'https://www.linkedin.com/in/' + slugMatch[1] + '/';
+          }
+        }
+      }
+    } catch (err) {
+      console.log('[EasyReach] Profile search failed:', err);
+    }
+    return '';
+  }
+
   // --- Profile fetching & caching ---
   const profileCache = {};
 
@@ -345,21 +593,6 @@
       if (!urlMatch) return {};
       let profileId = urlMatch[1];
 
-      // If it's an encoded ID (starts with ACoAA), resolve vanity from the profile page
-      if (profileId.startsWith('ACoAA')) {
-        try {
-          const pageResp = await fetch(profileUrl, { credentials: 'include' });
-          const html = await pageResp.text();
-          // Find all vanity names in the page, pick the one in a canonical/og:url tag
-          const ogMatch = html.match(/<meta[^>]*property="og:url"[^>]*content="[^"]*\/in\/([a-zA-Z0-9\-]+)/);
-          const linkMatch = html.match(/<link[^>]*rel="canonical"[^>]*href="[^"]*\/in\/([a-zA-Z0-9\-]+)/);
-          const resolved = (ogMatch && ogMatch[1]) || (linkMatch && linkMatch[1]);
-          if (resolved && !resolved.startsWith('ACoAA')) {
-            profileId = resolved;
-          }
-        } catch {}
-      }
-
       // Get CSRF token from cookies
       const csrfToken = document.cookie.match(/JSESSIONID="?([^";]+)"?/)?.[1] || '';
 
@@ -371,22 +604,6 @@
       const profile = {};
       const debugInfo = { profileId, apiResults: {} };
 
-      // 1. Resolve vanity name from dash API
-      try {
-        const dashResp = await fetch(
-          `https://www.linkedin.com/voyager/api/identity/dash/profiles?q=memberIdentity&memberIdentity=${profileId}&decorationId=com.linkedin.voyager.dash.deco.identity.profile.WebTopCardCore-18`,
-          { credentials: 'include', headers }
-        );
-        if (dashResp.ok) {
-          const data = await dashResp.json();
-          const elements = data.elements || [];
-          if (elements.length > 0) {
-            const p = elements[0];
-            if (p.publicIdentifier) profileId = p.publicIdentifier;
-          }
-        }
-      } catch {}
-
       // 2. Get full profile data from FullProfileWithEntities
       try {
         const fullResp = await fetch(
@@ -397,8 +614,24 @@
           const data = await fullResp.json();
           const el = (data.elements || [])[0];
           if (el) {
+            if (el.firstName) profile.firstName = el.firstName;
+            if (el.lastName) profile.lastName = el.lastName;
+            if (el.firstName && el.lastName) profile.name = `${el.firstName} ${el.lastName}`;
             if (el.headline) profile.headline = el.headline;
             if (el.summary) profile.about = el.summary.substring(0, 500);
+            // Extract profile picture from API
+            const picData = el.profilePicture?.displayImageReference?.vectorImage?.artifacts
+              || el.profilePictureOriginalImage?.displayImageReference?.vectorImage?.artifacts
+              || [];
+            if (picData.length > 0) {
+              const rootUrl = el.profilePicture?.displayImageReference?.vectorImage?.rootUrl
+                || el.profilePictureOriginalImage?.displayImageReference?.vectorImage?.rootUrl
+                || '';
+              const largest = picData[picData.length - 1];
+              if (rootUrl && largest?.fileIdentifyingUrlPathSegment) {
+                profile.photoUrl = rootUrl + largest.fileIdentifyingUrlPathSegment;
+              }
+            }
             if (el.geoLocation?.geo?.defaultLocalizedName) profile.location = el.geoLocation.geo.defaultLocalizedName;
             if (el.industry) profile.industry = el.industry;
 
@@ -740,18 +973,19 @@ Recipient: ${recipientInfo.name}`;
     toggleBtn.addEventListener('click', () => {
       sidebar.classList.toggle('open');
       if (sidebar.classList.contains('open')) {
-        updateRecipientInfo();
+        // Start hidden, fetch, then crossfade in
+        const contextRow = document.querySelector('.la-context-row');
+        if (contextRow) { contextRow.style.opacity = '0'; contextRow.style.transition = 'none'; }
         fetchAndUpdatePlaceholder();
       }
     });
 
-    document.addEventListener('click', (e) => {
-      if (!sidebar.classList.contains('open') || sidebar.contains(e.target) || e.target === toggleBtn) return;
-      // Don't close if clicking on LinkedIn UI elements (conversations, nav, buttons, links, inputs)
-      const interactive = e.target.closest('a, button, input, textarea, select, [role="button"], [role="link"], [role="option"], [role="listitem"], .msg-conversation-listitem, .msg-conversation-card, .msg-s-message-list-content, .global-nav, .scaffold-layout__list, .msg-overlay-list-bubble');
-      if (interactive) return;
+    // Close button
+    document.getElementById('la-close').addEventListener('click', () => {
       sidebar.classList.remove('open');
     });
+
+    // Sidebar only closes via the X button
 
     // Tab switching
     const tabs = sidebar.querySelectorAll('.la-tab');
@@ -766,49 +1000,182 @@ Recipient: ${recipientInfo.name}`;
       });
     });
 
+    // --- MutationObserver to detect new conversation participant ---
+    let mutationObserverInstance = null;
+
+    function detectParticipantViaMutation() {
+      // Stop any previous observer
+      if (mutationObserverInstance) {
+        mutationObserverInstance.disconnect();
+        mutationObserverInstance = null;
+      }
+
+      // Reset participant
+      activeMessagingParticipant = null;
+      latestMessagingParticipant = null;
+
+      if (!location.pathname.includes('/messaging/')) return;
+
+      // Snapshot existing STRONG texts to ignore them (they're from stale conversations)
+      const existingStrongs = new Set();
+      document.querySelectorAll('strong').forEach(s => {
+        const t = s.textContent.trim();
+        if (t) existingStrongs.add(t);
+      });
+
+      // Snapshot existing /in/ links
+      const existingLinks = new Set();
+      document.querySelectorAll('a[href*="/in/"]').forEach(a => {
+        const slug = a.href.match(/\/in\/([^/?]+)/)?.[1];
+        if (slug) existingLinks.add(slug);
+      });
+
+      console.log('[EasyReach] MutationObserver started. Existing strongs:', existingStrongs.size, 'Existing links:', existingLinks.size);
+
+      let foundName = '';
+      let foundProfileUrl = '';
+      const myName = getMyName();
+
+      mutationObserverInstance = new MutationObserver((mutations) => {
+        if (foundName && foundProfileUrl) return; // Already found
+
+        for (const mutation of mutations) {
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType !== Node.ELEMENT_NODE) continue;
+
+            // Check for new profile links
+            const newLinks = node.querySelectorAll ? node.querySelectorAll('a[href*="/in/"]') : [];
+            for (const link of newLinks) {
+              const slug = link.href.match(/\/in\/([^/?]+)/)?.[1];
+              if (slug && !existingLinks.has(slug) && !link.href.includes('/overlay/')) {
+                const staleSlug = lastProfilePageUrl ? lastProfilePageUrl.match(/\/in\/([^/?]+)/)?.[1] : '';
+                if (staleSlug && slug === staleSlug) continue;
+                const linkText = link.textContent.trim().split('·')[0].trim().split('\n')[0].trim();
+                // Skip links with "View" or "profile" text (e.g. "View Anthony's profile")
+                if (!linkText || linkText.includes('View') || linkText.includes('profile')) continue;
+                // Skip the logged-in user (exact or partial match)
+                if (myName) {
+                  const myFirst = myName.split(' ')[0].toLowerCase();
+                  if (linkText.toLowerCase() === myName.toLowerCase()) continue;
+                  if (linkText.toLowerCase().includes(myFirst) && linkText.length < myName.length + 15) continue;
+                }
+                foundProfileUrl = 'https://www.linkedin.com/in/' + slug + '/';
+                if (linkText && /^[A-Z]/.test(linkText)) {
+                  foundName = linkText;
+                }
+                console.log('[EasyReach] MutationObserver found new link:', foundProfileUrl, 'name:', foundName);
+              }
+            }
+
+            // Check for new STRONG tags (message sender names)
+            const newStrongs = node.querySelectorAll ? node.querySelectorAll('strong') : [];
+            if (node.tagName === 'STRONG') {
+              const t = node.textContent.trim();
+              if (t && !existingStrongs.has(t) && /^[A-Z]/.test(t) && t.length < 50) {
+                // Skip the logged-in user
+                if (!myName || t.toLowerCase() !== myName.toLowerCase()) {
+                  if (!foundName) foundName = t;
+                }
+              }
+            }
+            for (const strong of newStrongs) {
+              const t = strong.textContent.trim();
+              if (t && !existingStrongs.has(t) && /^[A-Z]/.test(t) && t.length < 50) {
+                // Skip the logged-in user
+                if (!myName || t.toLowerCase() !== myName.toLowerCase()) {
+                  if (!foundName) foundName = t;
+                }
+              }
+            }
+          }
+        }
+
+        // If we found something, update
+        if (foundName || foundProfileUrl) {
+          activeMessagingParticipant = {
+            name: foundName || 'Unknown',
+            profileUrl: foundProfileUrl,
+          };
+          console.log('[EasyReach] MutationObserver detected participant:', activeMessagingParticipant);
+          fetchAndUpdatePlaceholder();
+        }
+      });
+
+      mutationObserverInstance.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+
+      // Stop observing after 5 seconds to avoid performance issues
+      setTimeout(() => {
+        if (mutationObserverInstance) {
+          mutationObserverInstance.disconnect();
+          mutationObserverInstance = null;
+          console.log('[EasyReach] MutationObserver stopped. Found:', foundName, foundProfileUrl);
+        }
+      }, 5000);
+    }
+
     // Auto-update when switching conversations
     let lastConvoUrl = location.href;
     // Watch for URL changes (LinkedIn is a SPA, so URL changes without page reload)
     const urlObserver = setInterval(() => {
       if (location.href !== lastConvoUrl) {
         lastConvoUrl = location.href;
-        if (sidebar.classList.contains('open')) {
-          // Small delay to let LinkedIn render the new conversation
-          setTimeout(() => {
-            updateRecipientInfo();
-            fetchAndUpdatePlaceholder();
-            draftSection.style.display = 'none';
-            draftOutput.textContent = '';
-            promptInput.value = '';
-            errorDiv.textContent = '';
-          }, 500);
-        }
-      }
-    }, 300);
 
-    // Also watch for clicks on conversation list items
-    document.addEventListener('click', (e) => {
-      const convoItem = e.target.closest('.msg-conversation-listitem, .msg-conversation-card');
-      if (convoItem && sidebar.classList.contains('open')) {
-        setTimeout(() => {
-          updateRecipientInfo();
-          fetchAndUpdatePlaceholder();
+        // Start mutation detection BEFORE the UI updates
+        detectParticipantViaMutation();
+
+        if (sidebar.classList.contains('open')) {
+          // Immediately fade out picture/name/headline AND placeholder together
+          const contextRow = document.querySelector('.la-context-row');
+          if (contextRow) {
+            contextRow.style.transition = 'opacity 0.25s ease';
+            contextRow.style.opacity = '0';
+          }
+          let placeholderStyle = document.getElementById('la-placeholder-fade');
+          if (!placeholderStyle) {
+            placeholderStyle = document.createElement('style');
+            placeholderStyle.id = 'la-placeholder-fade';
+            document.head.appendChild(placeholderStyle);
+          }
+          placeholderStyle.textContent = '#la-prompt::placeholder { color: transparent !important; transition: color 0.25s ease; }';
+
           draftSection.style.display = 'none';
           draftOutput.textContent = '';
           promptInput.value = '';
           errorDiv.textContent = '';
-        }, 500);
-      }
-    });
 
-    // Update recipient info
+          // Poll iframe for new data, then fetch and fade in
+          let pollCount = 0;
+          const pollInterval = setInterval(() => {
+            pollCount++;
+            const info = getRecipientInfo();
+            if ((info.name && info.name !== 'Unknown') || pollCount >= 10) {
+              clearInterval(pollInterval);
+              fetchAndUpdatePlaceholder();
+            }
+          }, 150);
+        }
+      }
+    }, 300);
+
+    // Update recipient info (no transition — used for initial load)
     function updateRecipientInfo() {
       const info = getRecipientInfo();
-      document.getElementById('la-recipient-name').textContent = info.name;
-      document.getElementById('la-recipient-headline').textContent = info.headline;
+      // GUARD: never display the logged-in user as the recipient
+      if (cachedMyName && info.name && info.name.toLowerCase() === cachedMyName.toLowerCase()) {
+        info.name = 'Detecting...';
+        info.headline = '';
+        info.photoUrl = '';
+      }
+      const nameEl = document.getElementById('la-recipient-name');
+      const headlineEl = document.getElementById('la-recipient-headline');
       const photo = document.getElementById('la-recipient-photo');
       const initials = document.getElementById('la-recipient-initials');
-      // Always reset photo first to prevent stale images
+
+      nameEl.textContent = info.name;
+      headlineEl.textContent = info.headline;
       photo.src = '';
       photo.alt = '';
       photo.style.display = 'none';
@@ -824,66 +1191,127 @@ Recipient: ${recipientInfo.name}`;
         initials.style.display = 'flex';
       }
 
-      // Dynamic placeholder based on context
-      const firstName = (info.name || '').split(' ')[0] || 'them';
-      const headline = info.headline || '';
-      const history = getConversationHistory();
-      let placeholder;
-
       promptInput.placeholder = '';
+    }
+
+    // Crossfade: keep old visible, fade out, swap content, fade in
+    function crossfadeRecipientInfo(name, headline, photoUrl) {
+      const contextRow = document.querySelector('.la-context-row');
+      const nameEl = document.getElementById('la-recipient-name');
+      const headlineEl = document.getElementById('la-recipient-headline');
+      const photo = document.getElementById('la-recipient-photo');
+      const initials = document.getElementById('la-recipient-initials');
+      if (!contextRow) return;
+
+      // GUARD: never display the logged-in user as the recipient
+      if (cachedMyName && name && name.toLowerCase() === cachedMyName.toLowerCase()) {
+        name = 'Detecting...';
+        headline = '';
+        photoUrl = '';
+      }
+
+      // Content is already faded out — just swap and fade in
+      nameEl.textContent = name || 'Unknown';
+      headlineEl.textContent = headline || '';
+      photo.src = '';
+      photo.style.display = 'none';
+      initials.style.display = 'none';
+
+      if (photoUrl) {
+        photo.src = photoUrl;
+        photo.alt = name || '';
+        photo.style.display = 'block';
+      } else {
+        const nameInitials = (name || 'U').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+        initials.textContent = nameInitials;
+        initials.style.display = 'flex';
+      }
+
+      // Fade in
+      contextRow.style.transition = 'opacity 0.3s ease';
+      contextRow.style.opacity = '1';
+      // Restore placeholder color
+      let placeholderStyle = document.getElementById('la-placeholder-fade');
+      if (placeholderStyle) {
+        placeholderStyle.textContent = '#la-prompt::placeholder { color: #b0b0b0; transition: color 0.3s ease; }';
+      }
     }
 
     // Fetch profile and update placeholder with most recent experience
     let placeholderFetchId = 0;
     async function fetchAndUpdatePlaceholder() {
       const fetchId = ++placeholderFetchId;
-      const info = getRecipientInfo();
-      if (!info.profileUrl) return;
 
-      // Start fading in "e.g. " immediately
+      // Make sure we know who the logged-in user is before detecting recipient
+      if (myNamePromise) await myNamePromise;
+
+      let info = getRecipientInfo();
+
+      // On fresh messaging page load, data may not be ready yet — wait for intercepted
+      // API response or DOM to populate. Also treat self-name as not found.
+      const isSelfOrUnknown = (n) => !n || n === 'Unknown' || n === 'Detecting...' || (cachedMyName && n.toLowerCase() === cachedMyName.toLowerCase());
+      if (isSelfOrUnknown(info.name) && location.pathname.includes('/messaging/')) {
+        for (let retry = 0; retry < 15; retry++) {
+          await new Promise(r => setTimeout(r, 300));
+          if (fetchId !== placeholderFetchId) return;
+          info = getRecipientInfo();
+          if (!isSelfOrUnknown(info.name)) break;
+        }
+        // If still unknown/self, try the Voyager messaging API as last resort
+        if (isSelfOrUnknown(info.name)) {
+          const apiParticipant = await fetchActiveConversationParticipant();
+          if (fetchId !== placeholderFetchId) return;
+          if (apiParticipant) {
+            info.name = apiParticipant.name;
+            info.profileUrl = apiParticipant.profileUrl;
+            console.log('[EasyReach] Got participant from messaging API:', info.name);
+          }
+        }
+      }
+
+      // If no profile URL but we have a name, try searching by name
+      if (!info.profileUrl && info.name && info.name !== 'Unknown') {
+        const searchedUrl = await searchProfileByName(info.name);
+        if (searchedUrl) {
+          info.profileUrl = searchedUrl;
+        }
+      }
+
+      if (!info.profileUrl) {
+        // No profile URL — just show what we have and reveal
+        crossfadeRecipientInfo(info.name, info.headline || '', info.photoUrl || '');
+        return;
+      }
+
       promptInput.placeholder = '';
-      promptInput.style.transition = 'none';
-      promptInput.style.opacity = '1';
 
-      // Fade in the prefix
-      const prefix = 'for example, ';
-      let charIdx = 0;
-      const charDelay = Math.floor(1000 / prefix.length);
-      const prefixInterval = setInterval(() => {
-        if (fetchId !== placeholderFetchId) { clearInterval(prefixInterval); return; }
-        charIdx++;
-        promptInput.placeholder = prefix.substring(0, charIdx);
-        if (charIdx >= prefix.length) clearInterval(prefixInterval);
-      }, charDelay);
-
-      // Fetch profile in parallel
-      const firstName = (info.name || '').split(' ')[0] || 'them';
+      // Fetch profile
+      let firstName = (info.name || '').split(' ')[0] || 'them';
       const profile = await fetchFullProfile(info.profileUrl);
       if (fetchId !== placeholderFetchId) return;
 
+      // Apply all data and crossfade from old to new
+      const finalName = profile.name || info.name;
+      const finalHeadline = profile.headline || info.headline || '';
+      const finalPhoto = profile.photoUrl || '';
+      if (profile.name) firstName = profile.firstName || profile.name.split(' ')[0];
+
+      crossfadeRecipientInfo(finalName, finalHeadline, finalPhoto);
+
+      // Wait for fade-in to finish, then type out placeholder
       if (profile.experience) {
-        const mostRecent = profile.experience.split('\n')[0];
-        const rest = `ask about ${firstName}'s experience as ${mostRecent}`;
-
-        // Wait for prefix to finish if it hasn't
-        await new Promise(resolve => {
-          const check = setInterval(() => {
-            if (promptInput.placeholder.length >= prefix.length) {
-              clearInterval(check);
-              resolve();
-            }
-          }, 30);
-        });
-
+        await new Promise(resolve => setTimeout(resolve, 350));
         if (fetchId !== placeholderFetchId) return;
 
-        // Fade in the rest
-        let restIdx = 0;
-        const restInterval = setInterval(() => {
-          if (fetchId !== placeholderFetchId) { clearInterval(restInterval); return; }
-          restIdx += 2;
-          promptInput.placeholder = prefix + rest.substring(0, restIdx);
-          if (restIdx >= rest.length) clearInterval(restInterval);
+        const mostRecent = profile.experience.split('\n')[0];
+        const fullPlaceholder = `for example, ask about ${firstName}'s experience as ${mostRecent}`;
+
+        let idx = 0;
+        const typeInterval = setInterval(() => {
+          if (fetchId !== placeholderFetchId) { clearInterval(typeInterval); return; }
+          idx += 2;
+          promptInput.placeholder = fullPlaceholder.substring(0, idx);
+          if (idx >= fullPlaceholder.length) clearInterval(typeInterval);
         }, 16);
       }
     }
